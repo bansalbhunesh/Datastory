@@ -20,4 +20,6 @@ export type GenerateReportResponse = {
   markdown: string;
   lineage: LineageSummary;
   failedTests: FailedTestSummary[];
+  source: "claude" | "deterministic";
+  warnings?: string[];
 };

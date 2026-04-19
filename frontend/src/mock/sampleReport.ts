@@ -2,6 +2,8 @@ import type { GenerateReportResponse } from "../types/report";
 
 // Toggle this in `App.tsx` if OpenMetadata / Claude are flaky during a demo.
 export const sampleReport: GenerateReportResponse = {
+  source: "deterministic",
+  warnings: ["Mock dataset — not connected to OpenMetadata."],
   tableFQN: "sample_data.ecommerce_db.shopify.fact_order",
   markdown: [
     "## Incident summary",

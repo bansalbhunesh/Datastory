@@ -19,13 +19,14 @@ type lineageEdge struct {
 }
 
 type lineageGraph struct {
-	Entity            entityRef     `json:"entity"`
-	Nodes             []entityRef   `json:"nodes"`
-	UpstreamEdges     []lineageEdge `json:"upstreamEdges"`
-	DownstreamEdges   []lineageEdge `json:"downstreamEdges"`
+	Entity          entityRef     `json:"entity"`
+	Nodes           []entityRef   `json:"nodes"`
+	UpstreamEdges   []lineageEdge `json:"upstreamEdges"`
+	DownstreamEdges []lineageEdge `json:"downstreamEdges"`
 }
 
-// SummarizeLineage turns OpenMetadata lineage JSON into ordered upstream / downstream lists.
+// SummarizeLineage turns OpenMetadata lineage JSON into upstream / downstream FQN lists.
+// OpenMetadata edges are generally directed From -> To meaning data flows From -> To.
 func SummarizeLineage(lineageJSON []byte) (models.LineageSummary, error) {
 	var g lineageGraph
 	if err := json.Unmarshal(lineageJSON, &g); err != nil {
@@ -33,51 +34,34 @@ func SummarizeLineage(lineageJSON []byte) (models.LineageSummary, error) {
 	}
 
 	focal := strings.TrimSpace(g.Entity.FullyQualifiedName)
-	up := make([]string, 0)
-	down := make([]string, 0)
-	seenUp := map[string]struct{}{}
-	seenDown := map[string]struct{}{}
-
-	// Heuristic aligned with common OM payloads: upstreamEdges flow From -> To (From feeds To).
-	for _, e := range g.UpstreamEdges {
-		from := strings.TrimSpace(e.FromEntity.FullyQualifiedName)
-		to := strings.TrimSpace(e.ToEntity.FullyQualifiedName)
-		if from == "" {
-			continue
-		}
-		if focal == "" || to == focal || strings.TrimSpace(g.Entity.FullyQualifiedName) == "" {
-			if _, ok := seenUp[from]; !ok {
-				seenUp[from] = struct{}{}
-				up = append(up, from)
-			}
-		}
-	}
-	for _, e := range g.DownstreamEdges {
-		from := strings.TrimSpace(e.FromEntity.FullyQualifiedName)
-		to := strings.TrimSpace(e.ToEntity.FullyQualifiedName)
-		if to == "" {
-			continue
-		}
-		if focal == "" || from == focal {
-			if _, ok := seenDown[to]; !ok {
-				seenDown[to] = struct{}{}
-				down = append(down, to)
-			}
-		}
+	if focal == "" {
+		// Extremely defensive: still return raw edge counts.
+		return models.LineageSummary{
+			Focal:         "",
+			Upstream:      nil,
+			Downstream:    nil,
+			UpstreamRaw:   len(g.UpstreamEdges),
+			DownstreamRaw: len(g.DownstreamEdges),
+		}, nil
 	}
 
-	// Fallback: if edges were empty but nodes exist, still show something useful.
+	up := walkUpstream(focal, g.UpstreamEdges)
+	down := walkDownstream(focal, g.DownstreamEdges)
+
+	// Fallback when servers return nodes but sparse edges.
 	if len(up) == 0 && len(down) == 0 && len(g.Nodes) > 0 {
+		seen := map[string]struct{}{focal: {}}
+		down = make([]string, 0)
 		for _, n := range g.Nodes {
 			fqn := strings.TrimSpace(n.FullyQualifiedName)
-			if fqn == "" || fqn == focal {
+			if fqn == "" {
 				continue
 			}
-			// Without reliable direction, treat non-focal nodes as "related".
-			if _, ok := seenDown[fqn]; !ok {
-				seenDown[fqn] = struct{}{}
-				down = append(down, fqn)
+			if _, ok := seen[fqn]; ok {
+				continue
 			}
+			seen[fqn] = struct{}{}
+			down = append(down, fqn)
 		}
 	}
 
@@ -88,4 +72,74 @@ func SummarizeLineage(lineageJSON []byte) (models.LineageSummary, error) {
 		UpstreamRaw:   len(g.UpstreamEdges),
 		DownstreamRaw: len(g.DownstreamEdges),
 	}, nil
+}
+
+func fqnKey(e entityRef) string {
+	return strings.TrimSpace(e.FullyQualifiedName)
+}
+
+// walkUpstream collects all upstream FQNs reachable from focal using upstreamEdges (From feeds To).
+func walkUpstream(focal string, edges []lineageEdge) []string {
+	focal = strings.TrimSpace(focal)
+	queue := []string{focal}
+	seen := map[string]struct{}{focal: {}}
+	out := make([]string, 0)
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		for _, e := range edges {
+			to := fqnKey(e.ToEntity)
+			from := fqnKey(e.FromEntity)
+			if from == "" || to == "" {
+				continue
+			}
+			if to != cur {
+				continue
+			}
+			if _, ok := seen[from]; ok {
+				continue
+			}
+			seen[from] = struct{}{}
+			if from != focal {
+				out = append(out, from)
+			}
+			queue = append(queue, from)
+		}
+	}
+	return out
+}
+
+// walkDownstream collects downstream FQNs reachable from focal using downstreamEdges (From feeds To).
+func walkDownstream(focal string, edges []lineageEdge) []string {
+	focal = strings.TrimSpace(focal)
+	queue := []string{focal}
+	seen := map[string]struct{}{focal: {}}
+	out := make([]string, 0)
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		for _, e := range edges {
+			from := fqnKey(e.FromEntity)
+			to := fqnKey(e.ToEntity)
+			if from == "" || to == "" {
+				continue
+			}
+			if from != cur {
+				continue
+			}
+			if _, ok := seen[to]; ok {
+				continue
+			}
+			seen[to] = struct{}{}
+			if to != focal {
+				out = append(out, to)
+			}
+			queue = append(queue, to)
+		}
+	}
+	return out
 }

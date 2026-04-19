@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchReady, type ReadyResponse } from "./api/ready";
 import { generateReport } from "./api/report";
 import { LineageTrace } from "./components/LineageTrace";
 import { ReportCard } from "./components/ReportCard";
-import { SearchBar } from "./components/SearchBar";
 import { SeverityBadge } from "./components/SeverityBadge";
+import { StatusStrip } from "./components/StatusStrip";
+import { TableQueryField } from "./components/TableQueryField";
 import { sampleReport } from "./mock/sampleReport";
 import type { GenerateReportResponse } from "./types/report";
 
@@ -17,13 +19,36 @@ function guessSeverity(r: GenerateReportResponse): "LOW" | "MEDIUM" | "HIGH" | "
 }
 
 export default function App() {
-  const [mockMode, setMockMode] = useState(true);
+  const [mockMode, setMockMode] = useState(false);
   const [query, setQuery] = useState("dim_address");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<GenerateReportResponse | null>(null);
 
+  const [ready, setReady] = useState<ReadyResponse | null>(null);
+  const [readyLoading, setReadyLoading] = useState(true);
+  const [readyError, setReadyError] = useState<string | null>(null);
+
   const severity = useMemo(() => (report ? guessSeverity(report) : "UNKNOWN"), [report]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReadyLoading(true);
+    setReadyError(null);
+    fetchReady()
+      .then((r) => {
+        if (!cancelled) setReady(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setReadyError(e instanceof Error ? e.message : "ready failed");
+      })
+      .finally(() => {
+        if (!cancelled) setReadyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function onGenerate() {
     setError(null);
@@ -57,7 +82,8 @@ export default function App() {
             <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">DataStory</div>
             <h1 className="mt-1 text-3xl font-semibold text-white">AI incident report generator</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-300">
-              Pulls lineage + data quality signals from OpenMetadata, then asks Claude to write a postmortem-style report.
+              OpenMetadata supplies lineage and failing tests; the API turns that into a postmortem-style Markdown report (Claude when
+              configured, otherwise a deterministic draft).
             </p>
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -71,12 +97,19 @@ export default function App() {
           </label>
         </header>
 
-        <SearchBar
+        <StatusStrip ready={ready} loading={readyLoading} error={readyError} />
+
+        <TableQueryField
           value={query}
           onChange={setQuery}
           onSubmit={onGenerate}
           disabled={loading}
+          mockMode={mockMode}
         />
+
+        {loading ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/30 px-4 py-6 text-sm text-slate-400">Generating report…</div>
+        ) : null}
 
         {error ? (
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</div>
@@ -89,6 +122,8 @@ export default function App() {
                 title="Incident report"
                 subtitle={report.tableFQN}
                 markdown={report.markdown}
+                source={report.source}
+                warnings={report.warnings}
               />
             </div>
             <div className="flex flex-col gap-4">
@@ -115,9 +150,11 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-6 text-sm text-slate-400">
-            Generate a report to see lineage, failures, and the AI-written incident narrative.
-          </div>
+          !loading && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-6 text-sm text-slate-400">
+              Generate a report to see lineage, failures, and the incident narrative. Toggle mock mode for a guaranteed demo without Docker.
+            </div>
+          )
         )}
       </div>
     </div>

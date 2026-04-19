@@ -43,7 +43,11 @@ make dev
 
 ## API
 
+- `GET /api/ready` — UI readiness (`openmetadata.reachable`, `openmetadata.auth`, `claude.configured`)
+- `GET /api/search/tables?q=dim` — table search hits for autocomplete
 - `POST /api/generate-report` with JSON `{ "query": "dim_address" }` or `{ "tableFQN": "service.db.schema.table" }`
+  - Response includes `source`: `claude` or `deterministic` (draft works without `CLAUDE_API_KEY`)
+  - `warnings[]` explains fallbacks (for example Claude errors)
 - `GET /api/debug/lineage?q=dim_address` for a fast OpenMetadata sanity check (parsed summary + raw JSON)
 
 ## OpenMetadata endpoints used

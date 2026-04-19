@@ -17,8 +17,22 @@ export async function generateReport(req: GenerateReportRequest): Promise<Genera
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    let msg = text || `HTTP ${res.status}`;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (typeof j.error === "string" && j.error.trim()) {
+        msg = j.error.trim();
+      }
+    } catch {
+      // keep msg as raw body
+    }
+    throw new Error(msg.length > 800 ? `${msg.slice(0, 800)}…` : msg);
   }
 
-  return (await res.json()) as GenerateReportResponse;
+  const data = (await res.json()) as GenerateReportResponse;
+  return {
+    ...data,
+    source: data.source === "claude" ? "claude" : "deterministic",
+    warnings: data.warnings ?? [],
+  };
 }

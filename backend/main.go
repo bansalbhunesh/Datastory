@@ -40,6 +40,8 @@ func main() {
 	r.GET("/healthz", func(c *gin.Context) { c.Status(200) })
 	r.GET("/api/health", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 
+	r.GET("/api/ready", report.Ready)
+	r.GET("/api/search/tables", report.SearchTables)
 	r.POST("/api/generate-report", report.GenerateReport)
 	r.GET("/api/debug/lineage", report.DebugLineage)
 

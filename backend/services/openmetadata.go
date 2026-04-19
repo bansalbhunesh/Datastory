@@ -227,6 +227,29 @@ func (c *OpenMetadataClient) GetTableLineageByFQN(ctx context.Context, fqn strin
 	return raw, nil
 }
 
+// Ping checks that the OpenMetadata HTTP surface is reachable (does not validate auth).
+func (c *OpenMetadataClient) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/version", nil)
+	if err != nil {
+		return err
+	}
+	c.authHeader(req)
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// Many deployments allow unauthenticated version reads; auth failures still mean the server is up.
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("openmetadata ping: %s", resp.Status)
+	}
+	return nil
+}
+
 // ResolveTableFQN returns a table FQN from either explicit input or the first search hit.
 func (c *OpenMetadataClient) ResolveTableFQN(ctx context.Context, explicitFQN, searchQuery string) (string, json.RawMessage, error) {
 	explicitFQN = strings.TrimSpace(explicitFQN)

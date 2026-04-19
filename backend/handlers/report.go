@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bansalbhunesh/Datastory/backend/config"
 	"github.com/bansalbhunesh/Datastory/backend/models"
@@ -42,7 +43,7 @@ func (h *ReportHandler) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	lineageRaw, err := h.OM.GetTableLineageByFQN(ctx, tableFQN, 2, 2)
+	lineageRaw, err := h.OM.GetTableLineageByFQN(ctx, tableFQN, 3, 3)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "lineage fetch failed: " + err.Error()})
 		return
@@ -60,10 +61,20 @@ func (h *ReportHandler) GenerateReport(c *gin.Context) {
 		failed = nil
 	}
 
-	md, err := h.Claude.GenerateIncidentReportMarkdown(ctx, tableFQN, lineage, failed)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "claude failed: " + err.Error()})
-		return
+	warnings := make([]string, 0)
+	source := "deterministic"
+	md := services.DraftIncidentReportMarkdown(tableFQN, lineage, failed)
+
+	if strings.TrimSpace(h.Cfg.ClaudeAPIKey) != "" {
+		mdLLM, err := h.Claude.GenerateIncidentReportMarkdown(ctx, tableFQN, lineage, failed)
+		if err != nil {
+			warnings = append(warnings, "Claude generation failed; returned deterministic draft instead: "+err.Error())
+		} else {
+			md = mdLLM
+			source = "claude"
+		}
+	} else {
+		warnings = append(warnings, "CLAUDE_API_KEY not set; returning deterministic draft (still grounded in OpenMetadata facts).")
 	}
 
 	c.JSON(http.StatusOK, models.GenerateReportResponse{
@@ -71,6 +82,57 @@ func (h *ReportHandler) GenerateReport(c *gin.Context) {
 		Markdown:    md,
 		Lineage:     lineage,
 		FailedTests: failed,
+		Source:      source,
+		Warnings:    warnings,
+	})
+}
+
+// SearchTables exposes OpenMetadata table search for the UI autocomplete.
+func (h *ReportHandler) SearchTables(c *gin.Context) {
+	ctx := c.Request.Context()
+	if err := h.ensureOMSession(ctx); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "openmetadata auth failed: " + err.Error()})
+		return
+	}
+
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		c.JSON(http.StatusOK, gin.H{"hits": []services.TableSearchHit{}})
+		return
+	}
+
+	raw, err := h.OM.SearchTables(ctx, q, 15)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	hits, err := services.ParseTableSearchHits(raw)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hits": hits})
+}
+
+// Ready reports whether dependencies appear configured/reachable for the UI.
+func (h *ReportHandler) Ready(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	omReachable := h.OM.Ping(ctx) == nil
+	omAuthOK := strings.TrimSpace(h.OM.Token) != "" ||
+		(strings.TrimSpace(h.Cfg.OMEmail) != "" && h.Cfg.OMPassword != "")
+
+	claudeConfigured := strings.TrimSpace(h.Cfg.ClaudeAPIKey) != ""
+
+	c.JSON(http.StatusOK, gin.H{
+		"openmetadata": gin.H{
+			"reachable": omReachable,
+			"auth":      omAuthOK,
+		},
+		"claude": gin.H{
+			"configured": claudeConfigured,
+		},
 	})
 }
 
@@ -89,7 +151,7 @@ func (h *ReportHandler) DebugLineage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	raw, err := h.OM.GetTableLineageByFQN(ctx, tableFQN, 2, 2)
+	raw, err := h.OM.GetTableLineageByFQN(ctx, tableFQN, 3, 3)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
