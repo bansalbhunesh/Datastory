@@ -1,0 +1,25 @@
+# Env & secrets
+.env
+backend/.env
+frontend/.env
+*.local
+
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OpenMetadata docker volumes (large)
+docker/openmetadata/docker-volume/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,125 @@
+import { useMemo, useState } from "react";
+import { generateReport } from "./api/report";
+import { LineageTrace } from "./components/LineageTrace";
+import { ReportCard } from "./components/ReportCard";
+import { SearchBar } from "./components/SearchBar";
+import { SeverityBadge } from "./components/SeverityBadge";
+import { sampleReport } from "./mock/sampleReport";
+import type { GenerateReportResponse } from "./types/report";
+
+function guessSeverity(r: GenerateReportResponse): "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN" {
+  const fails = r.failedTests.length;
+  const down = r.lineage.downstream.length;
+  if (fails >= 2 || (fails >= 1 && down >= 3)) return "HIGH";
+  if (fails === 1 || down >= 2) return "MEDIUM";
+  if (fails === 0 && down <= 1) return "LOW";
+  return "UNKNOWN";
+}
+
+export default function App() {
+  const [mockMode, setMockMode] = useState(true);
+  const [query, setQuery] = useState("dim_address");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<GenerateReportResponse | null>(null);
+
+  const severity = useMemo(() => (report ? guessSeverity(report) : "UNKNOWN"), [report]);
+
+  async function onGenerate() {
+    setError(null);
+    if (mockMode) {
+      setReport(sampleReport);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const q = query.trim();
+      const isFqn = q.includes(".");
+      const res = await generateReport({
+        query: isFqn ? "" : q,
+        tableFQN: isFqn ? q : "",
+      });
+      setReport(res);
+    } catch (e) {
+      setReport(null);
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">DataStory</div>
+            <h1 className="mt-1 text-3xl font-semibold text-white">AI incident report generator</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">
+              Pulls lineage + data quality signals from OpenMetadata, then asks Claude to write a postmortem-style report.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              checked={mockMode}
+              onChange={(e) => setMockMode(e.target.checked)}
+              className="h-4 w-4 accent-indigo-500"
+            />
+            Mock mode (offline demo)
+          </label>
+        </header>
+
+        <SearchBar
+          value={query}
+          onChange={setQuery}
+          onSubmit={onGenerate}
+          disabled={loading}
+        />
+
+        {error ? (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</div>
+        ) : null}
+
+        {report ? (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <ReportCard
+                title="Incident report"
+                subtitle={report.tableFQN}
+                markdown={report.markdown}
+              />
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <SeverityBadge severity={severity} />
+              </div>
+              <LineageTrace lineage={report.lineage} />
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                <div className="text-sm font-semibold text-slate-200">Failed tests ({report.failedTests.length})</div>
+                <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                  {report.failedTests.length === 0 ? (
+                    <li className="text-slate-500">None returned (or not configured).</li>
+                  ) : (
+                    report.failedTests.map((t) => (
+                      <li key={t.name} className="rounded-lg border border-slate-800 bg-slate-950/30 p-2">
+                        <div className="font-medium text-slate-100">{t.name}</div>
+                        <div className="text-xs text-slate-400">{t.status}</div>
+                        {t.result ? <div className="mt-1 text-xs text-slate-300">{t.result}</div> : null}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-6 text-sm text-slate-400">
+            Generate a report to see lineage, failures, and the AI-written incident narrative.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

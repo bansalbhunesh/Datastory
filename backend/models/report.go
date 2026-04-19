@@ -1,0 +1,17 @@
+package models
+
+// GenerateReportRequest is the primary API contract for POST /api/generate-report.
+type GenerateReportRequest struct {
+	// Query is a free-text search keyword resolved via OpenMetadata search (tables).
+	Query string `json:"query"`
+	// TableFQN optionally bypasses search when you already know the fully qualified name.
+	TableFQN string `json:"tableFQN"`
+}
+
+// GenerateReportResponse is returned to the React app (and matches frontend types).
+type GenerateReportResponse struct {
+	TableFQN    string              `json:"tableFQN"`
+	Markdown    string              `json:"markdown"`
+	Lineage     LineageSummary      `json:"lineage"`
+	FailedTests []FailedTestSummary `json:"failedTests"`
+}
