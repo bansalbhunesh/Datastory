@@ -1,0 +1,128 @@
+package api
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/bansalbhunesh/Datastory/backend/internal/clients/llm"
+	"github.com/bansalbhunesh/Datastory/backend/internal/clients/openmetadata"
+	"github.com/bansalbhunesh/Datastory/backend/internal/errs"
+	"github.com/bansalbhunesh/Datastory/backend/internal/logging"
+	"github.com/bansalbhunesh/Datastory/backend/internal/services"
+)
+
+const (
+	maxQueryLen = 256
+	maxFQNLen   = 512
+)
+
+// Handlers is a thin HTTP layer. No business logic lives here.
+type Handlers struct {
+	report *services.ReportService
+	om     *openmetadata.Client
+	llm    llm.Client
+	log    *slog.Logger
+}
+
+func NewHandlers(r *services.ReportService, om *openmetadata.Client, l llm.Client, log *slog.Logger) *Handlers {
+	return &Handlers{report: r, om: om, llm: l, log: log}
+}
+
+// POST /api/generate-report
+func (h *Handlers) GenerateReport(c *gin.Context) {
+	var req GenerateReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.respondError(c, errs.BadRequest("invalid json: "+err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.Query) == "" && strings.TrimSpace(req.TableFQN) == "" {
+		h.respondError(c, errs.BadRequest("provide 'query' or 'tableFQN'"))
+		return
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	req.TableFQN = strings.TrimSpace(req.TableFQN)
+	if len(req.Query) > maxQueryLen {
+		h.respondError(c, errs.BadRequest("query too long"))
+		return
+	}
+	if len(req.TableFQN) > maxFQNLen {
+		h.respondError(c, errs.BadRequest("tableFQN too long"))
+		return
+	}
+
+	report, err := h.report.Generate(c.Request.Context(), services.GenerateInput{
+		Query: req.Query, TableFQN: req.TableFQN,
+	})
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toResponse(report))
+}
+
+// GET /api/search/tables?q=...
+func (h *Handlers) SearchTables(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if len(q) > maxQueryLen {
+		h.respondError(c, errs.BadRequest("q too long"))
+		return
+	}
+	hits, err := h.report.SearchTables(c.Request.Context(), q)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hits": hits})
+}
+
+// GET /api/ready
+func (h *Handlers) Ready(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	omReachable := h.om.Ping(ctx) == nil
+	omAuthOK := h.om.HasStaticToken() || h.om.HasCreds()
+	c.JSON(http.StatusOK, gin.H{
+		"openmetadata": gin.H{"reachable": omReachable, "auth": omAuthOK},
+		"claude":       gin.H{"configured": h.llm != nil && h.llm.Enabled()},
+	})
+}
+
+// GET /api/debug/lineage?tableFQN=...&q=...
+func (h *Handlers) DebugLineage(c *gin.Context) {
+	report, err := h.report.Generate(c.Request.Context(), services.GenerateInput{
+		Query: c.Query("q"), TableFQN: c.Query("tableFQN"),
+	})
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"tableFQN": report.TableFQN,
+		"lineage":  report.Lineage,
+	})
+}
+
+func (h *Handlers) respondError(c *gin.Context, err error) {
+	status := errs.HTTPStatus(err)
+	// Log at appropriate level.
+	log := logging.FromCtx(c.Request.Context(), h.log)
+	requestID := logging.RequestID(c.Request.Context())
+	if status >= 500 {
+		log.Error("request failed", "error", err.Error(), "status", status, "request_id", requestID)
+	} else {
+		log.Warn("request rejected", "error", err.Error(), "status", status, "request_id", requestID)
+	}
+	if status >= 500 {
+		c.JSON(status, gin.H{
+			"error":      "internal server error",
+			"request_id": requestID,
+		})
+		return
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
+}

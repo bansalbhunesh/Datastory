@@ -30,9 +30,10 @@ export async function generateReport(req: GenerateReportRequest): Promise<Genera
   }
 
   const data = (await res.json()) as GenerateReportResponse;
+  const source = data.source === "claude" || data.source === "llm" ? "claude" : "deterministic";
   return {
     ...data,
-    source: data.source === "claude" ? "claude" : "deterministic",
+    source,
     warnings: data.warnings ?? [],
   };
 }

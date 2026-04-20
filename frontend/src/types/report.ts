@@ -18,8 +18,9 @@ export type FailedTestSummary = {
 export type GenerateReportResponse = {
   tableFQN: string;
   markdown: string;
+  severity?: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
   lineage: LineageSummary;
   failedTests: FailedTestSummary[];
-  source: "claude" | "deterministic";
+  source: "claude" | "llm" | "deterministic";
   warnings?: string[];
 };

@@ -29,7 +29,10 @@ export default function App() {
   const [readyLoading, setReadyLoading] = useState(true);
   const [readyError, setReadyError] = useState<string | null>(null);
 
-  const severity = useMemo(() => (report ? guessSeverity(report) : "UNKNOWN"), [report]);
+  const severity = useMemo(() => {
+    if (!report) return "UNKNOWN";
+    return report.severity ?? guessSeverity(report);
+  }, [report]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,8 +89,9 @@ export default function App() {
               configured, otherwise a deterministic draft).
             </p>
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-200">
+          <label htmlFor="mock-mode-toggle" className="flex items-center gap-2 text-sm text-slate-200">
             <input
+              id="mock-mode-toggle"
               type="checkbox"
               checked={mockMode}
               onChange={(e) => setMockMode(e.target.checked)}
@@ -108,11 +112,15 @@ export default function App() {
         />
 
         {loading ? (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/30 px-4 py-6 text-sm text-slate-400">Generating report…</div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/30 px-4 py-6 text-sm text-slate-400" aria-live="polite">
+            Generating report…
+          </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</div>
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100" role="alert">
+            {error}
+          </div>
         ) : null}
 
         {report ? (
@@ -122,7 +130,7 @@ export default function App() {
                 title="Incident report"
                 subtitle={report.tableFQN}
                 markdown={report.markdown}
-                source={report.source}
+                source={report.source === "llm" ? "claude" : report.source}
                 warnings={report.warnings}
               />
             </div>

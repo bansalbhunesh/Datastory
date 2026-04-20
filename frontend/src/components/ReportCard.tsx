@@ -12,11 +12,18 @@ type Props = {
 
 export function ReportCard({ title, subtitle, markdown, source, warnings }: Props) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   const onCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(markdown);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setCopyError(null);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopyError("Clipboard permission denied. Use Download instead.");
+      setCopied(false);
+    }
   }, [markdown]);
 
   const onDownload = useCallback(() => {
@@ -66,6 +73,8 @@ export function ReportCard({ title, subtitle, markdown, source, warnings }: Prop
           </button>
         </div>
       </div>
+
+      {copyError ? <div className="mt-3 text-xs text-amber-300">{copyError}</div> : null}
 
       {warnings && warnings.length > 0 ? (
         <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
