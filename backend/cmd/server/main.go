@@ -40,11 +40,15 @@ func main() {
 		llmClient = disabledLLM{}
 	}
 
-	reportSvc := services.NewReportService(om, llmClient, log, cfg.CacheTTL)
+	incidentStore := services.NewFileIncidentStore(cfg.IncidentLogPath)
+	reportSvc := services.NewReportService(om, llmClient, log, cfg.CacheTTL, incidentStore)
 	handlers := api.NewHandlers(reportSvc, om, llmClient, log)
 	router := api.NewRouter(handlers, log, api.RouterConfig{
 		AllowedOrigins: cfg.AllowedOrigins,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
+		APIKey:         cfg.APIKey,
+		RateLimitRPS:   cfg.RateLimitRPS,
+		RateLimitBurst: cfg.RateLimitBurst,
 	})
 
 	srv := &http.Server{

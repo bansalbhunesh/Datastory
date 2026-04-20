@@ -2,9 +2,12 @@ package services
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,14 +21,22 @@ import (
 )
 
 type ReportService struct {
-	om    *openmetadata.Client
-	llm   llm.Client
-	log   *slog.Logger
-	cache *ttlCache
+	om        *openmetadata.Client
+	llm       llm.Client
+	log       *slog.Logger
+	cache     *ttlCache
+	sf        syncx.SingleFlight
+	incidents IncidentStore
 }
 
-func NewReportService(om *openmetadata.Client, l llm.Client, log *slog.Logger, cacheTTL time.Duration) *ReportService {
-	return &ReportService{om: om, llm: l, log: log, cache: newTTLCache(cacheTTL)}
+func NewReportService(om *openmetadata.Client, l llm.Client, log *slog.Logger, cacheTTL time.Duration, incidents IncidentStore) *ReportService {
+	return &ReportService{
+		om:        om,
+		llm:       l,
+		log:       log,
+		cache:     newTTLCache(cacheTTL, 1000),
+		incidents: incidents,
+	}
 }
 
 type GenerateInput struct {
@@ -42,6 +53,26 @@ func (s *ReportService) Generate(ctx context.Context, in GenerateInput) (*domain
 	if err != nil {
 		return nil, err
 	}
+	cacheKey := "report:" + strings.ToLower(strings.TrimSpace(fqn))
+	if v, ok := s.cache.get(cacheKey); ok {
+		if cached, ok := v.(domain.IncidentReport); ok {
+			r := cached
+			return &r, nil
+		}
+	}
+	v, err, _ := s.sf.Do(cacheKey, func() (any, error) {
+		return s.generateUncached(ctx, fqn, log)
+	})
+	if err != nil {
+		return nil, err
+	}
+	report := v.(domain.IncidentReport)
+	s.cache.set(cacheKey, report)
+	return &report, nil
+}
+
+func (s *ReportService) generateUncached(ctx context.Context, fqn string, log *slog.Logger) (domain.IncidentReport, error) {
+	var zero domain.IncidentReport
 
 	var (
 		lineage  domain.LineageSummary
@@ -81,7 +112,7 @@ func (s *ReportService) Generate(ctx context.Context, in GenerateInput) (*domain
 		return nil
 	})
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return zero, err
 	}
 
 	report := BuildDeterministicReport(fqn, lineage, failed)
@@ -99,7 +130,16 @@ func (s *ReportService) Generate(ctx context.Context, in GenerateInput) (*domain
 	} else {
 		report.Warnings = append(report.Warnings, "CLAUDE_API_KEY not set; returning deterministic draft (facts are from OpenMetadata).")
 	}
-	return &report, nil
+	if s.incidents != nil {
+		_ = s.incidents.Append(domain.IncidentLogEntry{
+			ID:        shortID(fqn + report.Markdown),
+			CreatedAt: time.Now().Unix(),
+			TableFQN:  report.TableFQN,
+			Severity:  report.Severity,
+			Source:    report.Source,
+		})
+	}
+	return report, nil
 }
 
 func (s *ReportService) resolveFQN(ctx context.Context, in GenerateInput) (string, error) {
@@ -119,6 +159,9 @@ func (s *ReportService) resolveFQN(ctx context.Context, in GenerateInput) (strin
 	}
 	if len(hits) == 0 {
 		return "", errs.BadRequest(fmt.Sprintf("no table hits for %q", q))
+	}
+	if len(hits) > 1 && hits[0].Score == hits[1].Score {
+		return "", errs.BadRequest("ambiguous query; provide full tableFQN")
 	}
 	fqn := hits[0].FullyQualifiedName
 	s.cache.set("fqn:"+q, fqn)
@@ -146,6 +189,29 @@ func (s *ReportService) SearchTables(ctx context.Context, q string) ([]domain.Ta
 	return s.om.SearchTables(ctx, q, 15)
 }
 
+func (s *ReportService) Lineage(ctx context.Context, in GenerateInput) (*domain.LineageSummary, string, error) {
+	fqn, err := s.resolveFQN(ctx, in)
+	if err != nil {
+		return nil, "", err
+	}
+	raw, err := s.lineage(ctx, fqn)
+	if err != nil {
+		return nil, "", errs.Upstream("lineage fetch", err)
+	}
+	sum, err := SummarizeLineage(raw)
+	if err != nil {
+		return nil, "", errs.Upstream("lineage parse", err)
+	}
+	return &sum, fqn, nil
+}
+
+func (s *ReportService) ListIncidents(tableFQN string, limit int) ([]domain.IncidentLogEntry, error) {
+	if s.incidents == nil {
+		return []domain.IncidentLogEntry{}, nil
+	}
+	return s.incidents.ListByTable(strings.TrimSpace(tableFQN), limit)
+}
+
 // rewriteMarkdown asks the LLM to rewrite the deterministic markdown in incident-report style.
 // We include facts explicitly and instruct the model not to invent anything.
 func (s *ReportService) rewriteMarkdown(ctx context.Context, r domain.IncidentReport) (string, error) {
@@ -155,15 +221,18 @@ func (s *ReportService) rewriteMarkdown(ctx context.Context, r domain.IncidentRe
 	b.WriteString("Facts (authoritative):\n")
 	fmt.Fprintf(&b, "- Table: %s\n", r.TableFQN)
 	fmt.Fprintf(&b, "- Computed severity: %s\n", r.Severity)
-	fmt.Fprintf(&b, "- Upstream: %s\n", join(r.Lineage.Upstream, "none"))
-	fmt.Fprintf(&b, "- Downstream: %s\n", join(r.Lineage.Downstream, "none"))
+	up := capSlice(r.Lineage.Upstream, 5)
+	down := capSlice(r.Lineage.Downstream, 10)
+	fmt.Fprintf(&b, "- Upstream: %s\n", join(up, "none"))
+	fmt.Fprintf(&b, "- Downstream: %s\n", join(down, "none"))
 	fmt.Fprintf(&b, "- Lineage edge counts: upstream=%d downstream=%d\n", r.Lineage.UpstreamRaw, r.Lineage.DownstreamRaw)
-	if len(r.FailedTests) == 0 {
+	failed := capFailedTests(r.FailedTests, 5)
+	if len(failed) == 0 {
 		b.WriteString("- Failing tests: none returned by OpenMetadata\n")
 	} else {
 		b.WriteString("- Failing tests:\n")
-		for _, t := range r.FailedTests {
-			fmt.Fprintf(&b, "  - %s [%s]: %s\n", t.Name, t.Status, truncate(t.Result, 300))
+		for _, t := range failed {
+			fmt.Fprintf(&b, "  - %s [%s]: %s\n", t.Name, t.Status, truncate(t.Result, 150))
 		}
 	}
 	b.WriteString("\nWrite an incident report with these exact H2 sections, in this order:\n")
@@ -172,8 +241,9 @@ func (s *ReportService) rewriteMarkdown(ctx context.Context, r domain.IncidentRe
 	b.WriteString("3. `## Impact assessment` (bullets; downstream consumers)\n")
 	b.WriteString("4. `## Severity` (MUST match the computed severity: " + string(r.Severity) + ")\n")
 	b.WriteString("5. `## Recommended remediation` (bullets, concrete steps)\n")
+	b.WriteString("Return markdown only, no preamble or code fences.\n")
 
-	md, err := s.llm.Rewrite(ctx, system, b.String(), 2048)
+	md, err := s.llm.Rewrite(ctx, system, b.String(), 900)
 	if err != nil {
 		return "", err
 	}
@@ -184,21 +254,25 @@ func (s *ReportService) rewriteMarkdown(ctx context.Context, r domain.IncidentRe
 }
 
 func looksLikeValidReport(md string, sev domain.Severity) bool {
-	lower := strings.ToLower(md)
+	headers := extractH2(md)
 	required := []string{
-		"## incident summary",
-		"## root cause analysis",
-		"## impact assessment",
-		"## severity",
-		"## recommended remediation",
+		"incident summary",
+		"root cause analysis",
+		"impact assessment",
+		"severity",
+		"recommended remediation",
 	}
-	for _, s := range required {
-		if !strings.Contains(lower, s) {
+	for _, r := range required {
+		if !slices.Contains(headers, r) {
 			return false
 		}
 	}
-	// Severity must be present literally (guards against LLM hallucinating a different level).
-	return strings.Contains(md, string(sev))
+	sevBody := sectionBody(md, "severity")
+	if sevBody == "" {
+		return false
+	}
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(string(sev)) + `\b`)
+	return re.FindStringIndex(strings.ToUpper(sevBody)) != nil
 }
 
 func join(ss []string, empty string) string {
@@ -206,4 +280,59 @@ func join(ss []string, empty string) string {
 		return empty
 	}
 	return strings.Join(ss, ", ")
+}
+
+func extractH2(md string) []string {
+	out := []string{}
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "## ") {
+			out = append(out, strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "## "))))
+		}
+	}
+	return out
+}
+
+func sectionBody(md, name string) string {
+	lines := strings.Split(md, "\n")
+	target := "## " + strings.ToLower(strings.TrimSpace(name))
+	start := -1
+	for i, line := range lines {
+		if strings.ToLower(strings.TrimSpace(line)) == target {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+	var b strings.Builder
+	for i := start; i < len(lines); i++ {
+		trim := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trim, "## ") {
+			break
+		}
+		b.WriteString(lines[i])
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func shortID(seed string) string {
+	sum := sha1.Sum([]byte(seed + time.Now().UTC().Format(time.RFC3339Nano)))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func capSlice(in []string, max int) []string {
+	if len(in) <= max {
+		return in
+	}
+	return in[:max]
+}
+
+func capFailedTests(in []domain.FailedTest, max int) []domain.FailedTest {
+	if len(in) <= max {
+		return in
+	}
+	return in[:max]
 }

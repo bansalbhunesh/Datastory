@@ -29,6 +29,7 @@ func (c *Client) SearchTables(ctx context.Context, q string, size int) ([]domain
 	var raw struct {
 		Hits struct {
 			Hits []struct {
+				Score  float64         `json:"_score"`
 				Source domain.TableHit `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
@@ -39,6 +40,7 @@ func (c *Client) SearchTables(ctx context.Context, q string, size int) ([]domain
 	out := make([]domain.TableHit, 0, len(raw.Hits.Hits))
 	for _, h := range raw.Hits.Hits {
 		if strings.TrimSpace(h.Source.FullyQualifiedName) != "" {
+			h.Source.Score = h.Score
 			out = append(out, h.Source)
 		}
 	}

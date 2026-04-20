@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,7 +95,7 @@ func (h *Handlers) Ready(c *gin.Context) {
 
 // GET /api/debug/lineage?tableFQN=...&q=...
 func (h *Handlers) DebugLineage(c *gin.Context) {
-	report, err := h.report.Generate(c.Request.Context(), services.GenerateInput{
+	lineage, fqn, err := h.report.Lineage(c.Request.Context(), services.GenerateInput{
 		Query: c.Query("q"), TableFQN: c.Query("tableFQN"),
 	})
 	if err != nil {
@@ -102,9 +103,26 @@ func (h *Handlers) DebugLineage(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"tableFQN": report.TableFQN,
-		"lineage":  report.Lineage,
+		"tableFQN": fqn,
+		"lineage":  lineage,
 	})
+}
+
+// GET /api/incidents?tableFQN=...&limit=...
+func (h *Handlers) ListIncidents(c *gin.Context) {
+	tableFQN := strings.TrimSpace(c.Query("tableFQN"))
+	limit := 20
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	entries, err := h.report.ListIncidents(tableFQN, limit)
+	if err != nil {
+		h.respondError(c, errs.Internal("failed to list incidents", err))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"incidents": entries})
 }
 
 func (h *Handlers) respondError(c *gin.Context, err error) {

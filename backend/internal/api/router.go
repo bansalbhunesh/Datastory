@@ -13,6 +13,9 @@ import (
 type RouterConfig struct {
 	AllowedOrigins []string
 	MaxBodyBytes   int64
+	APIKey         string
+	RateLimitRPS   float64
+	RateLimitBurst int
 }
 
 // NewRouter assembles all middleware + routes.
@@ -21,6 +24,8 @@ func NewRouter(h *Handlers, log *slog.Logger, cfg RouterConfig) *gin.Engine {
 	r := gin.New()
 
 	r.Use(middleware.RequestID())
+	r.Use(middleware.APIKey(cfg.APIKey))
+	r.Use(middleware.RateLimit(cfg.RateLimitRPS, cfg.RateLimitBurst))
 	r.Use(middleware.BodyLimit(cfg.MaxBodyBytes))
 	r.Use(middleware.AccessLog(log))
 	r.Use(middleware.Recovery(log))
@@ -42,6 +47,7 @@ func NewRouter(h *Handlers, log *slog.Logger, cfg RouterConfig) *gin.Engine {
 		api.GET("/search/tables", h.SearchTables)
 		api.POST("/generate-report", h.GenerateReport)
 		api.GET("/debug/lineage", h.DebugLineage)
+		api.GET("/incidents", h.ListIncidents)
 	}
 	return r
 }

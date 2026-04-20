@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchReady, type ReadyResponse } from "./api/ready";
 import { generateReport } from "./api/report";
+import { fetchIncidents, type IncidentEntry } from "./api/incidents";
 import { LineageTrace } from "./components/LineageTrace";
 import { ReportCard } from "./components/ReportCard";
 import { SeverityBadge } from "./components/SeverityBadge";
@@ -24,6 +25,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<GenerateReportResponse | null>(null);
+  const [incidents, setIncidents] = useState<IncidentEntry[]>([]);
 
   const [ready, setReady] = useState<ReadyResponse | null>(null);
   const [readyLoading, setReadyLoading] = useState(true);
@@ -69,6 +71,8 @@ export default function App() {
         tableFQN: isFqn ? q : "",
       });
       setReport(res);
+      const history = await fetchIncidents(res.tableFQN, 8);
+      setIncidents(history);
     } catch (e) {
       setReport(null);
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -138,7 +142,31 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2">
                 <SeverityBadge severity={severity} />
               </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">
+                <div className="font-semibold text-slate-100">Why this severity?</div>
+                <div className="mt-1">
+                  Failed tests: <span className="font-semibold">{report.failedTests.length}</span> | Downstream tables:{" "}
+                  <span className="font-semibold">{report.lineage.downstream.length}</span>
+                </div>
+              </div>
               <LineageTrace lineage={report.lineage} />
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                <div className="text-sm font-semibold text-slate-200">Recent incidents</div>
+                <ul className="mt-3 space-y-2 text-xs text-slate-300">
+                  {incidents.length === 0 ? (
+                    <li className="text-slate-500">No saved incidents yet for this table.</li>
+                  ) : (
+                    incidents.map((i) => (
+                      <li key={i.id} className="rounded-lg border border-slate-800 bg-slate-950/30 p-2">
+                        <div className="font-medium text-slate-100">{new Date(i.createdAt * 1000).toLocaleString()}</div>
+                        <div className="text-slate-400">
+                          {i.severity} via {i.source === "llm" ? "claude" : i.source}
+                        </div>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
                 <div className="text-sm font-semibold text-slate-200">Failed tests ({report.failedTests.length})</div>
                 <ul className="mt-3 space-y-2 text-sm text-slate-300">

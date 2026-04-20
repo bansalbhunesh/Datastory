@@ -9,9 +9,10 @@ const (
 )
 
 type TableHit struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	FullyQualifiedName string `json:"fullyQualifiedName"`
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	FullyQualifiedName string  `json:"fullyQualifiedName"`
+	Score              float64 `json:"score,omitempty"`
 }
 
 type LineageSummary struct {
@@ -44,4 +45,12 @@ type IncidentReport struct {
 	FailedTests []FailedTest   `json:"failedTests"`
 	Source      string         `json:"source"` // "deterministic" | "llm"
 	Warnings    []string       `json:"warnings,omitempty"`
+}
+
+type IncidentLogEntry struct {
+	ID        string   `json:"id"`
+	CreatedAt int64    `json:"createdAt"`
+	TableFQN  string   `json:"tableFQN"`
+	Severity  Severity `json:"severity"`
+	Source    string   `json:"source"`
 }
