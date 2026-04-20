@@ -26,6 +26,20 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 		mu     sync.Mutex
 		states = map[string]limiterState{}
 	)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			mu.Lock()
+			for k, s := range states {
+				if now.Sub(s.last) > 5*time.Minute {
+					delete(states, k)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
 	return func(c *gin.Context) {
 		key := strings.TrimSpace(c.GetHeader(apiKeyHeader))
 		if key == "" {

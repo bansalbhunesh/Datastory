@@ -131,13 +131,15 @@ func (s *ReportService) generateUncached(ctx context.Context, fqn string, log *s
 		report.Warnings = append(report.Warnings, "CLAUDE_API_KEY not set; returning deterministic draft (facts are from OpenMetadata).")
 	}
 	if s.incidents != nil {
-		_ = s.incidents.Append(domain.IncidentLogEntry{
+		if err := s.incidents.Append(domain.IncidentLogEntry{
 			ID:        shortID(fqn + report.Markdown),
 			CreatedAt: time.Now().Unix(),
 			TableFQN:  report.TableFQN,
 			Severity:  report.Severity,
 			Source:    report.Source,
-		})
+		}); err != nil {
+			log.Warn("incident persist failed", "error", err.Error(), "table", report.TableFQN)
+		}
 	}
 	return report, nil
 }

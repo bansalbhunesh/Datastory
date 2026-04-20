@@ -13,6 +13,10 @@ const apiKeyHeader = "X-API-Key"
 func APIKey(expected string) gin.HandlerFunc {
 	expected = strings.TrimSpace(expected)
 	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
 		if expected == "" {
 			c.Next()
 			return
