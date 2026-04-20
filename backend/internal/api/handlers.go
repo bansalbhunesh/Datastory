@@ -56,7 +56,10 @@ func (h *Handlers) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	report, err := h.report.Generate(c.Request.Context(), services.GenerateInput{
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	report, err := h.report.Generate(ctx, services.GenerateInput{
 		Query: req.Query, TableFQN: req.TableFQN,
 	})
 	if err != nil {
@@ -111,6 +114,10 @@ func (h *Handlers) DebugLineage(c *gin.Context) {
 // GET /api/incidents?tableFQN=...&limit=...
 func (h *Handlers) ListIncidents(c *gin.Context) {
 	tableFQN := strings.TrimSpace(c.Query("tableFQN"))
+	if tableFQN == "" {
+		h.respondError(c, errs.BadRequest("tableFQN required"))
+		return
+	}
 	limit := 20
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 100 {

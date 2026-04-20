@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -250,14 +251,22 @@ func (s *ReportService) rewriteMarkdown(ctx context.Context, r domain.IncidentRe
 	b.WriteString("4. `## Severity` (MUST match the computed severity: " + string(r.Severity) + ")\n")
 	b.WriteString("5. `## Recommended remediation` (bullets, concrete steps)\n")
 	b.WriteString("Return markdown only, no preamble or code fences.\n")
+	prompt := b.String()
+	llmCacheKey := "llm:" + sha256Hex(system+"||"+prompt)
+	if v, ok := s.cache.get(llmCacheKey); ok {
+		if cached, ok := v.(string); ok && cached != "" {
+			return cached, nil
+		}
+	}
 
-	md, err := s.llm.Rewrite(ctx, system, b.String(), 900)
+	md, err := s.llm.Rewrite(ctx, system, prompt, 900)
 	if err != nil {
 		return "", err
 	}
 	if !looksLikeValidReport(md, r.Severity) {
 		return "", errs.Upstream("llm output failed schema check", nil)
 	}
+	s.cache.set(llmCacheKey, md)
 	return md, nil
 }
 
@@ -346,4 +355,9 @@ func capFailedTests(in []domain.FailedTest, max int) []domain.FailedTest {
 		return in
 	}
 	return in[:max]
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%x", sum[:])
 }

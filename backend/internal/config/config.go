@@ -50,7 +50,7 @@ func Load() (Config, error) {
 		APIKey:          strings.TrimSpace(os.Getenv("API_KEY")),
 		RateLimitRPS:    float64Val("RATE_LIMIT_RPS", 5),
 		RateLimitBurst:  intVal("RATE_LIMIT_BURST", 20),
-		IncidentLogPath: get("INCIDENT_LOG_PATH", "data/incidents.jsonl"),
+		IncidentLogPath: get("INCIDENT_LOG_PATH", "data/incidents.db"),
 	}
 	cfg.LLMEnabled = cfg.LLMAPIKey != ""
 
