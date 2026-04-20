@@ -20,6 +20,12 @@ import (
 	"github.com/bansalbhunesh/Datastory/backend/internal/syncx"
 )
 
+var severityRegex = map[domain.Severity]*regexp.Regexp{
+	domain.SeverityLow:    regexp.MustCompile(`\bLOW\b`),
+	domain.SeverityMedium: regexp.MustCompile(`\bMEDIUM\b`),
+	domain.SeverityHigh:   regexp.MustCompile(`\bHIGH\b`),
+}
+
 type ReportService struct {
 	om        *openmetadata.Client
 	llm       llm.Client
@@ -273,7 +279,10 @@ func looksLikeValidReport(md string, sev domain.Severity) bool {
 	if sevBody == "" {
 		return false
 	}
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(string(sev)) + `\b`)
+	re, ok := severityRegex[sev]
+	if !ok {
+		return false
+	}
 	return re.FindStringIndex(strings.ToUpper(sevBody)) != nil
 }
 

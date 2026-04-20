@@ -1,3 +1,5 @@
+import { apiHeaders } from "./auth";
+
 export type TableSearchHit = {
   id: string;
   name: string;
@@ -6,7 +8,7 @@ export type TableSearchHit = {
 
 export async function searchTables(q: string): Promise<TableSearchHit[]> {
   const params = new URLSearchParams({ q });
-  const res = await fetch(`/api/search/tables?${params.toString()}`);
+  const res = await fetch(`/api/search/tables?${params.toString()}`, { headers: apiHeaders() });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);

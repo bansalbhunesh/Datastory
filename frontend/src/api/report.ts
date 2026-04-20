@@ -1,4 +1,5 @@
 import type { GenerateReportResponse } from "../types/report";
+import { apiHeaders } from "./auth";
 
 export type GenerateReportRequest = {
   query?: string;
@@ -8,7 +9,7 @@ export type GenerateReportRequest = {
 export async function generateReport(req: GenerateReportRequest): Promise<GenerateReportResponse> {
   const res = await fetch("/api/generate-report", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       query: req.query ?? "",
       tableFQN: req.tableFQN ?? "",

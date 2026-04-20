@@ -1,3 +1,5 @@
+import { apiHeaders } from "./auth";
+
 export type IncidentEntry = {
   id: string;
   createdAt: number;
@@ -8,7 +10,7 @@ export type IncidentEntry = {
 
 export async function fetchIncidents(tableFQN: string, limit = 10): Promise<IncidentEntry[]> {
   const q = new URLSearchParams({ tableFQN, limit: String(limit) }).toString();
-  const res = await fetch(`/api/incidents?${q}`);
+  const res = await fetch(`/api/incidents?${q}`, { headers: apiHeaders() });
   if (!res.ok) {
     return [];
   }
