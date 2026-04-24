@@ -28,6 +28,7 @@ type Config struct {
 	RateLimitRPS    float64
 	RateLimitBurst  int
 	IncidentLogPath string
+	FrontendDist    string // path to built frontend dist/; empty = disabled
 }
 
 func Load() (Config, error) {
@@ -35,7 +36,8 @@ func Load() (Config, error) {
 	_ = godotenv.Load(".env")
 
 	cfg := Config{
-		Port:            get("BACKEND_PORT", "8080"),
+		// Render injects PORT; BACKEND_PORT is the local-dev override.
+		Port:            get("BACKEND_PORT", get("PORT", "8080")),
 		OMBaseURL:       strings.TrimRight(get("OM_BASE_URL", get("OM_URL", "http://localhost:8585")), "/"),
 		OMToken:         strings.TrimSpace(os.Getenv("OM_TOKEN")),
 		OMEmail:         strings.TrimSpace(os.Getenv("OM_EMAIL")),
@@ -51,6 +53,7 @@ func Load() (Config, error) {
 		RateLimitRPS:    float64Val("RATE_LIMIT_RPS", 5),
 		RateLimitBurst:  intVal("RATE_LIMIT_BURST", 20),
 		IncidentLogPath: get("INCIDENT_LOG_PATH", "data/incidents.db"),
+		FrontendDist:    strings.TrimSpace(os.Getenv("FRONTEND_DIST")),
 	}
 	cfg.LLMEnabled = cfg.LLMAPIKey != ""
 
@@ -66,9 +69,12 @@ func Load() (Config, error) {
 	if cfg.RateLimitBurst <= 0 {
 		return cfg, errors.New("RATE_LIMIT_BURST must be > 0")
 	}
-	for _, origin := range cfg.AllowedOrigins {
-		if origin == "*" {
-			return cfg, errors.New("ALLOWED_ORIGINS cannot contain '*' when credentials are enabled")
+	// '*' is only unsafe when API_KEY auth is active (credentials header is sent).
+	if cfg.APIKey != "" {
+		for _, origin := range cfg.AllowedOrigins {
+			if origin == "*" {
+				return cfg, errors.New("ALLOWED_ORIGINS cannot contain '*' when API_KEY is set")
+			}
 		}
 	}
 	return cfg, nil

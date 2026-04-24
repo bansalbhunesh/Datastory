@@ -2,6 +2,9 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -11,11 +14,13 @@ import (
 )
 
 type RouterConfig struct {
-	AllowedOrigins []string
-	MaxBodyBytes   int64
-	APIKey         string
-	RateLimitRPS   float64
-	RateLimitBurst int
+	AllowedOrigins  []string
+	MaxBodyBytes    int64
+	APIKey          string
+	RateLimitRPS    float64
+	RateLimitBurst  int
+	AllowCredentials bool
+	FrontendDist    string // path to built frontend; empty = disabled
 }
 
 // NewRouter assembles all middleware + routes.
@@ -29,7 +34,7 @@ func NewRouter(h *Handlers, log *slog.Logger, cfg RouterConfig) *gin.Engine {
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "X-Request-ID", "X-API-Key"},
 		ExposeHeaders:    []string{"Content-Length", "X-Request-ID"},
-		AllowCredentials: true,
+		AllowCredentials: cfg.AllowCredentials,
 		MaxAge:           12 * time.Hour,
 	}))
 	r.Use(middleware.BodyLimit(cfg.MaxBodyBytes))
@@ -49,5 +54,31 @@ func NewRouter(h *Handlers, log *slog.Logger, cfg RouterConfig) *gin.Engine {
 		api.GET("/debug/lineage", h.DebugLineage)
 		api.GET("/incidents", h.ListIncidents)
 	}
+	// Serve the built React frontend (SPA) when FRONTEND_DIST is configured.
+	// All API routes are already registered above, so only unmatched paths reach here.
+	if cfg.FrontendDist != "" {
+		r.NoRoute(spaHandler(cfg.FrontendDist))
+	}
+
 	return r
+}
+
+// spaHandler serves static files from distDir. If a file doesn't exist it
+// falls back to index.html so React Router can handle client-side routes.
+func spaHandler(distDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Prevent path traversal.
+		clean := filepath.Join(distDir, filepath.Clean("/"+c.Request.URL.Path))
+		info, err := os.Stat(clean)
+		if err == nil && !info.IsDir() {
+			c.File(clean)
+			return
+		}
+		index := filepath.Join(distDir, "index.html")
+		if _, err := os.Stat(index); err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.File(index)
+	}
 }
