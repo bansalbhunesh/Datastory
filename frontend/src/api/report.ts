@@ -35,6 +35,7 @@ export async function generateReport(req: GenerateReportRequest): Promise<Genera
   return {
     ...data,
     source,
+    severity: data.severity ?? "UNKNOWN",
     warnings: data.warnings ?? [],
   };
 }

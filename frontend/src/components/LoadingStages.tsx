@@ -24,7 +24,6 @@ export function LoadingStages({ stage }: { stage: Stage }) {
         {STAGES.map((s, idx) => {
           const isActive = s.key === stage;
           const isDone = idx < currentIdx;
-          const isPending = idx > currentIdx;
 
           return (
             <div
@@ -53,7 +52,6 @@ export function LoadingStages({ stage }: { stage: Stage }) {
               {isDone && (
                 <span className="text-xs text-emerald-400">✓</span>
               )}
-              {isPending && null}
             </div>
           );
         })}

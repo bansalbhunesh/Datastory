@@ -26,7 +26,7 @@ export type SeverityExplanation = {
 export type GenerateReportResponse = {
   tableFQN: string;
   markdown: string;
-  severity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  severity?: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
   summary?: string;
   rootCauses?: string[];
   impacts?: string[];

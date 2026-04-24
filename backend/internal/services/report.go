@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -181,8 +182,8 @@ func (s *ReportService) resolveFQN(ctx context.Context, in GenerateInput) (strin
 	if len(hits) == 0 {
 		return "", errs.BadRequest(fmt.Sprintf("no table hits for %q", q))
 	}
-	if len(hits) > 1 && hits[0].Score == hits[1].Score {
-		return "", errs.BadRequest("ambiguous query; provide full tableFQN")
+	if len(hits) > 1 && math.Abs(hits[0].Score-hits[1].Score) < 0.001 {
+		return "", errs.BadRequest(fmt.Sprintf("ambiguous query: %q and %q both match — provide full tableFQN", hits[0].FullyQualifiedName, hits[1].FullyQualifiedName))
 	}
 	fqn := hits[0].FullyQualifiedName
 	s.cache.set("fqn:"+q, fqn)
