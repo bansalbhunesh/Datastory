@@ -15,12 +15,25 @@ export type FailedTestSummary = {
   description?: string;
 };
 
+export type SeverityExplanation = {
+  failedTestCount: number;
+  downstreamCount: number;
+  upstreamCount: number;
+  lineageComplete: boolean;
+  confidence: number;
+};
+
 export type GenerateReportResponse = {
   tableFQN: string;
   markdown: string;
-  severity?: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  severity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  summary?: string;
+  rootCauses?: string[];
+  impacts?: string[];
+  remediation?: string[];
   lineage: LineageSummary;
   failedTests: FailedTestSummary[];
+  explanation?: SeverityExplanation;
   source: "claude" | "llm" | "deterministic";
   warnings?: string[];
 };

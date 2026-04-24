@@ -3,8 +3,17 @@ import type { GenerateReportResponse } from "../types/report";
 // Toggle this in `App.tsx` if OpenMetadata / Claude are flaky during a demo.
 export const sampleReport: GenerateReportResponse = {
   source: "deterministic",
+  severity: "HIGH",
   warnings: ["Mock dataset — not connected to OpenMetadata."],
   tableFQN: "sample_data.ecommerce_db.shopify.fact_order",
+  summary: "Order facts show elevated NULL rates in `revenue_usd` starting at 09:15 UTC. Downstream revenue dashboards are impacted.",
+  explanation: {
+    failedTestCount: 1,
+    downstreamCount: 2,
+    upstreamCount: 2,
+    lineageComplete: true,
+    confidence: 82,
+  },
   markdown: [
     "## Incident summary",
     "Order facts show elevated NULL rates in `revenue_usd` starting at 09:15 UTC. Downstream revenue dashboards are impacted.",

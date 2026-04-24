@@ -21,10 +21,32 @@ func ClassifySeverity(failed []domain.FailedTest, downstream int) domain.Severit
 	}
 }
 
+func computeConfidence(fails, downstream int, lineageComplete bool) int {
+	score := 40
+	f := fails
+	if f > 3 {
+		f = 3
+	}
+	score += f * 15
+	d := downstream
+	if d > 5 {
+		d = 5
+	}
+	score += d * 5
+	if lineageComplete {
+		score += 20
+	}
+	if score > 97 {
+		score = 97
+	}
+	return score
+}
+
 // BuildDeterministicReport produces the source-of-truth structured report.
 // The LLM is only allowed to rewrite the *markdown*; all facts come from here.
 func BuildDeterministicReport(tableFQN string, lineage domain.LineageSummary, failed []domain.FailedTest) domain.IncidentReport {
 	sev := ClassifySeverity(failed, len(lineage.Downstream))
+	lineageComplete := lineage.Focal != "" || len(lineage.Upstream) > 0 || len(lineage.Downstream) > 0
 
 	rootCauses := make([]string, 0)
 	for _, t := range failed {
@@ -67,6 +89,13 @@ func BuildDeterministicReport(tableFQN string, lineage domain.LineageSummary, fa
 		Lineage:     lineage,
 		FailedTests: failed,
 		Source:      "deterministic",
+		Explanation: domain.SeverityExplanation{
+			FailedTestCount: len(failed),
+			DownstreamCount: len(lineage.Downstream),
+			UpstreamCount:   len(lineage.Upstream),
+			LineageComplete: lineageComplete,
+			Confidence:      computeConfidence(len(failed), len(lineage.Downstream), lineageComplete),
+		},
 	}
 	report.Markdown = renderMarkdown(report)
 	return report

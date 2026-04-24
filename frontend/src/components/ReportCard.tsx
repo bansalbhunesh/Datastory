@@ -8,9 +8,29 @@ type Props = {
   markdown: string;
   source?: "claude" | "deterministic";
   warnings?: string[];
+  filename?: string;
 };
 
-export function ReportCard({ title, subtitle, markdown, source, warnings }: Props) {
+function translateWarning(w: string): string {
+  if (w.includes("CLAUDE_API_KEY") || w.includes("AI enhancement not configured")) {
+    return "AI enhancement not configured — showing verified rule-based report.";
+  }
+  if (w.includes("LLM rewrite failed") || w.includes("AI enhancement unavailable")) {
+    return "AI enhancement unavailable — showing verified rule-based report.";
+  }
+  if (w.includes("lineage unavailable")) {
+    return "Lineage data unavailable — severity may be underestimated.";
+  }
+  if (w.includes("lineage data could not be parsed") || w.includes("lineage parse failed")) {
+    return "Lineage data could not be parsed — impact scope unknown.";
+  }
+  if (w.includes("data quality tests unavailable")) {
+    return "Quality test data unavailable — root cause analysis is incomplete.";
+  }
+  return w;
+}
+
+export function ReportCard({ title, subtitle, markdown, source, warnings, filename }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
@@ -31,10 +51,10 @@ export function ReportCard({ title, subtitle, markdown, source, warnings }: Prop
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "datastory-incident-report.md";
+    a.download = filename ?? "datastory-incident-report.md";
     a.click();
     URL.revokeObjectURL(url);
-  }, [markdown]);
+  }, [markdown, filename]);
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-gradient-to-b from-slate-900/70 to-slate-950/40 p-6 shadow-xl">
@@ -50,8 +70,13 @@ export function ReportCard({ title, subtitle, markdown, source, warnings }: Prop
                     ? "rounded-full bg-indigo-500/15 px-2.5 py-0.5 text-xs font-semibold text-indigo-200 ring-1 ring-indigo-400/30"
                     : "rounded-full bg-slate-500/15 px-2.5 py-0.5 text-xs font-semibold text-slate-200 ring-1 ring-slate-400/25"
                 }
+                title={
+                  source === "claude"
+                    ? "Claude rewrote this report using only verified facts from OpenMetadata"
+                    : "All facts sourced directly from OpenMetadata — no AI inference"
+                }
               >
-                Narrative: {source === "claude" ? "Claude" : "Deterministic draft"}
+                {source === "claude" ? "✦ AI-Enhanced" : "◆ Rule-Based"}
               </span>
             </div>
           ) : null}
@@ -78,10 +103,10 @@ export function ReportCard({ title, subtitle, markdown, source, warnings }: Prop
 
       {warnings && warnings.length > 0 ? (
         <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
-          <div className="font-semibold text-amber-200">Warnings</div>
+          <div className="font-semibold text-amber-200">Notice</div>
           <ul className="mt-2 list-disc space-y-1 pl-4">
             {warnings.map((w) => (
-              <li key={w}>{w}</li>
+              <li key={w}>{translateWarning(w)}</li>
             ))}
           </ul>
         </div>

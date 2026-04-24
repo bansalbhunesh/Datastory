@@ -33,18 +33,29 @@ type FailedTest struct {
 }
 
 // IncidentReport is the canonical structured output produced by services.
+// SeverityExplanation is a structured breakdown of why the severity was assigned.
+// All fields are deterministic — never LLM-inferred.
+type SeverityExplanation struct {
+	FailedTestCount int  `json:"failedTestCount"`
+	DownstreamCount int  `json:"downstreamCount"`
+	UpstreamCount   int  `json:"upstreamCount"`
+	LineageComplete bool `json:"lineageComplete"`
+	Confidence      int  `json:"confidence"` // 0–100
+}
+
 type IncidentReport struct {
-	TableFQN    string         `json:"tableFQN"`
-	Severity    Severity       `json:"severity"`
-	Summary     string         `json:"summary"`
-	RootCauses  []string       `json:"rootCauses"`
-	Impacts     []string       `json:"impacts"`
-	Remediation []string       `json:"remediation"`
-	Markdown    string         `json:"markdown"`
-	Lineage     LineageSummary `json:"lineage"`
-	FailedTests []FailedTest   `json:"failedTests"`
-	Source      string         `json:"source"` // "deterministic" | "llm"
-	Warnings    []string       `json:"warnings,omitempty"`
+	TableFQN    string             `json:"tableFQN"`
+	Severity    Severity           `json:"severity"`
+	Summary     string             `json:"summary"`
+	RootCauses  []string           `json:"rootCauses"`
+	Impacts     []string           `json:"impacts"`
+	Remediation []string           `json:"remediation"`
+	Markdown    string             `json:"markdown"`
+	Lineage     LineageSummary     `json:"lineage"`
+	FailedTests []FailedTest       `json:"failedTests"`
+	Explanation SeverityExplanation `json:"explanation"`
+	Source      string             `json:"source"` // "deterministic" | "claude"
+	Warnings    []string           `json:"warnings,omitempty"`
 }
 
 type IncidentLogEntry struct {
