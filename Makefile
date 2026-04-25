@@ -12,7 +12,7 @@ install:
 	cd frontend && npm install
 
 backend:
-	cd backend && go run .
+	cd backend && go run ./cmd/server
 
 frontend:
 	cd frontend && npm run dev

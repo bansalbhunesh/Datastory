@@ -40,13 +40,11 @@ func main() {
 		llmClient = disabledLLM{}
 	}
 
-	incidentStore := services.NewFileIncidentStore(cfg.IncidentLogPath)
-	sqliteStore, err := services.NewSQLiteIncidentStore(cfg.IncidentLogPath)
+	incidentStore, err := services.NewSQLiteIncidentStore(cfg.IncidentLogPath)
 	if err != nil {
 		log.Error("failed to initialize sqlite incident store", "error", err.Error())
 		os.Exit(1)
 	}
-	incidentStore = sqliteStore
 	reportSvc := services.NewReportService(om, llmClient, log, cfg.CacheTTL, incidentStore)
 	handlers := api.NewHandlers(reportSvc, om, llmClient, log)
 	router := api.NewRouter(handlers, log, api.RouterConfig{
