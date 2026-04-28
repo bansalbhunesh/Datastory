@@ -100,7 +100,10 @@ func (c *Client) loginLocked(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	b, _ := io.ReadAll(resp.Body)
+	b, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return errs.Upstream("login read", readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return errs.Unauthorized(fmt.Sprintf("login failed: %s", resp.Status))
 	}
@@ -153,8 +156,16 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 			backoff(ctx, attempt)
 			continue
 		}
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		resp.Body.Close()
+		if readErr != nil {
+			lastErr = errs.Upstream("read response", readErr)
+			if !retryable(ctx, attempt, maxAttempts) {
+				return lastErr
+			}
+			backoff(ctx, attempt)
+			continue
+		}
 
 		// If auth expired, drop token & retry once.
 		if resp.StatusCode == http.StatusUnauthorized && c.email != "" && attempt == 1 {

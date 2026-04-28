@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -65,16 +66,25 @@ func NewRouter(h *Handlers, log *slog.Logger, cfg RouterConfig) *gin.Engine {
 
 // spaHandler serves static files from distDir. If a file doesn't exist it
 // falls back to index.html so React Router can handle client-side routes.
+// Path traversal is mitigated by both filepath.Clean *and* a final
+// containment check against the absolute distDir.
 func spaHandler(distDir string) gin.HandlerFunc {
+	absRoot, err := filepath.Abs(distDir)
+	if err != nil {
+		absRoot = distDir
+	}
 	return func(c *gin.Context) {
-		// Prevent path traversal.
-		clean := filepath.Join(distDir, filepath.Clean("/"+c.Request.URL.Path))
-		info, err := os.Stat(clean)
-		if err == nil && !info.IsDir() {
+		clean := filepath.Join(absRoot, filepath.Clean("/"+c.Request.URL.Path))
+		// Belt-and-braces: refuse anything that escapes the dist root after Clean+Join.
+		if !strings.HasPrefix(clean+string(os.PathSeparator), absRoot+string(os.PathSeparator)) && clean != absRoot {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if info, err := os.Stat(clean); err == nil && !info.IsDir() {
 			c.File(clean)
 			return
 		}
-		index := filepath.Join(distDir, "index.html")
+		index := filepath.Join(absRoot, "index.html")
 		if _, err := os.Stat(index); err != nil {
 			c.Status(http.StatusNotFound)
 			return

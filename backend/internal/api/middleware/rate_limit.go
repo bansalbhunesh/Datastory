@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,8 +15,21 @@ type limiterState struct {
 	last   time.Time
 }
 
+const (
+	rateLimitCleanupInterval = 60 * time.Second
+	rateLimitStaleAfter      = 5 * time.Minute
+)
+
 // RateLimit enforces an in-memory token bucket per API-key or client IP.
+// The variant with context cancels the background cleanup goroutine when
+// the context is done; use it from places with a clean shutdown lifecycle.
 func RateLimit(rps float64, burst int) gin.HandlerFunc {
+	return RateLimitWithContext(context.Background(), rps, burst)
+}
+
+// RateLimitWithContext is the lifecycle-aware variant. The cleanup goroutine
+// exits when ctx is done, preventing goroutine leaks in tests / shutdowns.
+func RateLimitWithContext(ctx context.Context, rps float64, burst int) gin.HandlerFunc {
 	if rps <= 0 {
 		rps = 5
 	}
@@ -27,20 +41,30 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 		states = map[string]limiterState{}
 	)
 	go func() {
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(rateLimitCleanupInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			now := time.Now()
-			mu.Lock()
-			for k, s := range states {
-				if now.Sub(s.last) > 5*time.Minute {
-					delete(states, k)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				mu.Lock()
+				for k, s := range states {
+					if now.Sub(s.last) > rateLimitStaleAfter {
+						delete(states, k)
+					}
 				}
+				mu.Unlock()
 			}
-			mu.Unlock()
 		}
 	}()
 	return func(c *gin.Context) {
+		// CORS preflight is browser-issued and usually unauthenticated; never
+		// rate-limit it or callers see opaque CORS failures.
+		if c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
 		key := strings.TrimSpace(c.GetHeader(apiKeyHeader))
 		if key == "" {
 			key = c.ClientIP()

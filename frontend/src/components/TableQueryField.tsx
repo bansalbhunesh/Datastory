@@ -27,23 +27,27 @@ export function TableQueryField({ value, onChange, onSubmit, disabled, mockMode,
       setActiveIndex(-1);
       return;
     }
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
-    searchTables(debounced)
+    searchTables(debounced, controller.signal)
       .then((h) => {
-        if (!cancelled) {
-          setHits(h);
-          setActiveIndex(h.length > 0 ? 0 : -1);
-        }
+        if (cancelled) return;
+        setHits(h);
+        setActiveIndex(h.length > 0 ? 0 : -1);
       })
-      .catch(() => {
-        if (!cancelled) setHits([]);
+      .catch((err) => {
+        if (cancelled) return;
+        // Abort errors fire on cleanup; ignore them.
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setHits([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [debounced, mockMode]);
 

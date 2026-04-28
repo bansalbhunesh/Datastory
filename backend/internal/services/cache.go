@@ -13,7 +13,7 @@ type ttlEntry struct {
 type ttlCache struct {
 	ttl  time.Duration
 	max  int
-	mu   sync.RWMutex
+	mu   sync.Mutex
 	data map[string]ttlEntry
 }
 
@@ -28,16 +28,14 @@ func newTTLCache(ttl time.Duration, maxEntries int) *ttlCache {
 }
 
 func (c *ttlCache) get(key string) (any, bool) {
-	c.mu.RLock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e, ok := c.data[key]
-	c.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
 	if time.Now().After(e.exp) {
-		c.mu.Lock()
 		delete(c.data, key)
-		c.mu.Unlock()
 		return nil, false
 	}
 	return e.val, true
@@ -45,23 +43,32 @@ func (c *ttlCache) get(key string) (any, bool) {
 
 func (c *ttlCache) set(key string, val any) {
 	c.mu.Lock()
-	if len(c.data) >= c.max {
-		now := time.Now()
-		removed := false
-		for k, v := range c.data {
-			if now.After(v.exp) {
-				delete(c.data, k)
-				removed = true
-				break
-			}
-		}
-		if !removed {
-			for k := range c.data {
-				delete(c.data, k)
-				break
-			}
-		}
+	defer c.mu.Unlock()
+	if _, ok := c.data[key]; !ok && len(c.data) >= c.max {
+		c.evictOneLocked()
 	}
 	c.data[key] = ttlEntry{val: val, exp: time.Now().Add(c.ttl)}
-	c.mu.Unlock()
+}
+
+// evictOneLocked drops one expired entry, or the entry closest to expiry if
+// nothing has expired yet. Must be called with c.mu held.
+func (c *ttlCache) evictOneLocked() {
+	now := time.Now()
+	var oldestKey string
+	oldestExp := time.Time{}
+	first := true
+	for k, v := range c.data {
+		if now.After(v.exp) {
+			delete(c.data, k)
+			return
+		}
+		if first || v.exp.Before(oldestExp) {
+			oldestKey = k
+			oldestExp = v.exp
+			first = false
+		}
+	}
+	if oldestKey != "" {
+		delete(c.data, oldestKey)
+	}
 }

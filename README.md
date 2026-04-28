@@ -193,9 +193,18 @@ If the UI is on Vercel and the API on Render (or another host), configure **rewr
 ## Development
 
 ```bash
-cd backend && make test    # unit tests + race detector
-cd backend && make lint    # go vet
+make test                  # backend + frontend tests
+make lint                  # go vet
+make build                 # production binary that serves the SPA from /
+cd backend  && make test   # backend only (race detector enabled)
+cd frontend && npm test    # frontend only (Vitest + Testing Library)
 ```
+
+The integration test in `backend/internal/api/integration_test.go` boots the
+full router (middleware + handlers + report service + SQLite store) against a
+fake OpenMetadata server and exercises every public endpoint — including the
+sanitized error response, async incident persistence, oversized-body limit,
+and SPA path-traversal containment.
 
 More backend internals: [`backend/README.md`](backend/README.md).
 

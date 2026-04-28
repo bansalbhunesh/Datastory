@@ -34,6 +34,7 @@ export type GenerateReportResponse = {
   lineage: LineageSummary;
   failedTests: FailedTestSummary[];
   explanation?: SeverityExplanation;
-  source: "claude" | "llm" | "deterministic";
+  // Frontend always normalizes to one of these two via api/report.ts.
+  source: "claude" | "deterministic";
   warnings?: string[];
 };

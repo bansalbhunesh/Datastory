@@ -2,7 +2,9 @@ package services
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +13,11 @@ import (
 	"github.com/bansalbhunesh/Datastory/backend/internal/domain"
 )
 
+// IncidentStore persists incident history. Append takes a context so callers
+// can bound long-running writes (e.g. a slow disk) and avoid goroutine leaks
+// when the surrounding request is cancelled.
 type IncidentStore interface {
-	Append(domain.IncidentLogEntry) error
+	Append(ctx context.Context, e domain.IncidentLogEntry) error
 	ListByTable(tableFQN string, limit int) ([]domain.IncidentLogEntry, error)
 }
 
@@ -25,7 +30,13 @@ func NewFileIncidentStore(path string) IncidentStore {
 	return &fileIncidentStore{path: strings.TrimSpace(path)}
 }
 
-func (s *fileIncidentStore) Append(e domain.IncidentLogEntry) error {
+func (s *fileIncidentStore) Append(ctx context.Context, e domain.IncidentLogEntry) error {
+	if strings.TrimSpace(e.ID) == "" {
+		return errors.New("incident: empty id")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
@@ -79,7 +90,6 @@ func (s *fileIncidentStore) ListByTable(tableFQN string, limit int) ([]domain.In
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	// reverse newest-first and apply limit
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
