@@ -3,12 +3,14 @@ services:
     name: datastory
     env: go
     rootDir: backend
-    buildCommand: >
-      cd ../frontend &&
-      npm ci &&
-      npm run build &&
-      cp -r dist ../backend/dist &&
-      cd ../backend &&
+    healthCheckPath: /healthz
+    # buildCommand runs from rootDir (backend). We bundle the React build into
+    # backend/dist so the Go binary can serve the SPA via FRONTEND_DIST.
+    buildCommand: >-
+      set -e &&
+      (cd ../frontend && npm ci && npm run build) &&
+      rm -rf ./dist &&
+      cp -r ../frontend/dist ./dist &&
       go build -o bin/datastory ./cmd/server
     startCommand: ./bin/datastory
     envVars:
@@ -16,6 +18,8 @@ services:
         value: ./dist
       - key: INCIDENT_LOG_PATH
         value: /tmp/incidents.db
+      # If API_KEY is set later, change ALLOWED_ORIGINS to your real frontend
+      # origin(s) — the server refuses to start with "*" + API_KEY.
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: LOG_LEVEL
@@ -29,5 +33,10 @@ services:
         sync: false
       - key: OM_PASSWORD
         sync: false
+      - key: OM_TOKEN
+        sync: false
       - key: CLAUDE_API_KEY
+        sync: false
+      # Optional shared-secret API gate. When set, ALLOWED_ORIGINS must NOT be "*".
+      - key: API_KEY
         sync: false

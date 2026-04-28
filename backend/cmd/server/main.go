@@ -46,7 +46,9 @@ func main() {
 		os.Exit(1)
 	}
 	reportSvc := services.NewReportService(om, llmClient, log, cfg.CacheTTL, incidentStore)
-	handlers := api.NewHandlers(reportSvc, om, llmClient, log)
+	handlers := api.NewHandlers(reportSvc, om, llmClient, log, api.HandlersConfig{
+		GenerateTimeout: cfg.RequestTimeout,
+	})
 	router := api.NewRouter(handlers, log, api.RouterConfig{
 		AllowedOrigins:   cfg.AllowedOrigins,
 		MaxBodyBytes:     cfg.MaxBodyBytes,

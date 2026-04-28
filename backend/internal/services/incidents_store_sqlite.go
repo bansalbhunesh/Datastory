@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -21,14 +22,18 @@ func NewSQLiteIncidentStore(path string) (IncidentStore, error) {
 	if path == "" {
 		return nil, errors.New("incident sqlite path is empty")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
 	}
 	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	// modernc/sqlite is single-writer friendly. Cap pool to avoid surprises.
+	db.SetMaxOpenConns(4)
 	if _, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS incidents (
 	id TEXT PRIMARY KEY,
@@ -46,8 +51,15 @@ CREATE INDEX IF NOT EXISTS idx_incidents_table_created
 	return &sqliteIncidentStore{db: db}, nil
 }
 
-func (s *sqliteIncidentStore) Append(e domain.IncidentLogEntry) error {
-	_, err := s.db.Exec(`INSERT INTO incidents(id, created_at, table_fqn, severity, source) VALUES(?,?,?,?,?)`,
+func (s *sqliteIncidentStore) Append(ctx context.Context, e domain.IncidentLogEntry) error {
+	if strings.TrimSpace(e.ID) == "" {
+		return errors.New("incident: empty id")
+	}
+	if strings.TrimSpace(e.TableFQN) == "" {
+		return errors.New("incident: empty tableFQN")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO incidents(id, created_at, table_fqn, severity, source) VALUES(?,?,?,?,?)`,
 		e.ID, e.CreatedAt, e.TableFQN, string(e.Severity), e.Source)
 	return err
 }

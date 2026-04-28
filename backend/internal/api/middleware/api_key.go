@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -10,8 +11,10 @@ import (
 const apiKeyHeader = "X-API-Key"
 
 // APIKey rejects requests without a valid API key when configured.
+// Comparison is constant-time to avoid leaking key length / prefix via timing.
 func APIKey(expected string) gin.HandlerFunc {
 	expected = strings.TrimSpace(expected)
+	expectedBytes := []byte(expected)
 	return func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {
 			c.Next()
@@ -21,7 +24,9 @@ func APIKey(expected string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if c.GetHeader(apiKeyHeader) != expected {
+		got := []byte(c.GetHeader(apiKeyHeader))
+		if subtle.ConstantTimeEq(int32(len(got)), int32(len(expectedBytes))) != 1 ||
+			subtle.ConstantTimeCompare(got, expectedBytes) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid api key"})
 			return
 		}

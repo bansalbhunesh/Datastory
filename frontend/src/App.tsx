@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { fetchReady, type ReadyResponse } from "./api/ready";
 import { generateReport } from "./api/report";
 import { fetchIncidents, type IncidentEntry } from "./api/incidents";
 import { ExplainabilityPanel } from "./components/ExplainabilityPanel";
-import { IncidentChart } from "./components/IncidentChart";
-import { LineageGraph } from "./components/LineageGraph";
 import { LoadingStages, type Stage } from "./components/LoadingStages";
 import { ReportCard } from "./components/ReportCard";
 import { SeverityBadge } from "./components/SeverityBadge";
@@ -13,6 +11,15 @@ import { StatusStrip } from "./components/StatusStrip";
 import { TableQueryField } from "./components/TableQueryField";
 import { sampleReport } from "./mock/sampleReport";
 import type { GenerateReportResponse } from "./types/report";
+
+// Heavy chart/graph deps (~250 KB minified each) lazy-load so the initial
+// shell paints fast even on slow networks.
+const LineageGraph = lazy(() =>
+  import("./components/LineageGraph").then((m) => ({ default: m.LineageGraph })),
+);
+const IncidentChart = lazy(() =>
+  import("./components/IncidentChart").then((m) => ({ default: m.IncidentChart })),
+);
 
 const EXAMPLE_QUERIES = ["dim_address", "fact_order", "stg_customers", "raw_shopify_orders"];
 
@@ -32,6 +39,18 @@ export default function App() {
   const [ready, setReady] = useState<ReadyResponse | null>(null);
   const [readyLoading, setReadyLoading] = useState(true);
   const [readyError, setReadyError] = useState<string | null>(null);
+
+  // Holds active stage timers and any in-flight generate request id so we
+  // can drop late results when the user submits again or unmounts.
+  const stageTimersRef = useRef<number[]>([]);
+  const generateSeqRef = useRef(0);
+
+  const clearStageTimers = useCallback(() => {
+    stageTimersRef.current.forEach((id) => window.clearTimeout(id));
+    stageTimersRef.current = [];
+  }, []);
+
+  useEffect(() => () => clearStageTimers(), [clearStageTimers]);
 
   const loading = stage !== "idle" && stage !== "done";
   const severity = report?.severity ?? "UNKNOWN";
@@ -55,19 +74,31 @@ export default function App() {
       setError(null);
 
       if (mockMode) {
+        clearStageTimers();
         setReport(sampleReport);
         setIncidents([]);
         setStage("done");
         return;
       }
 
+      // Bump sequence so any prior in-flight request becomes a no-op on resolve.
+      const seq = ++generateSeqRef.current;
+      clearStageTimers();
       setReport(null);
       setIncidents([]);
       setStage("resolving");
 
-      const t1 = setTimeout(() => setStage("lineage"), 800);
-      const t2 = setTimeout(() => setStage("quality"), 2200);
-      const t3 = setTimeout(() => setStage("writing"), 3800);
+      stageTimersRef.current = [
+        window.setTimeout(() => {
+          if (generateSeqRef.current === seq) setStage("lineage");
+        }, 800),
+        window.setTimeout(() => {
+          if (generateSeqRef.current === seq) setStage("quality");
+        }, 2200),
+        window.setTimeout(() => {
+          if (generateSeqRef.current === seq) setStage("writing");
+        }, 3800),
+      ];
 
       try {
         const isFqn = q.includes(".");
@@ -75,23 +106,26 @@ export default function App() {
           query: isFqn ? "" : q,
           tableFQN: isFqn ? q : "",
         });
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
+        if (generateSeqRef.current !== seq) return; // stale result
+        clearStageTimers();
         setReport(res);
         setStage("done");
-        const history = await fetchIncidents(res.tableFQN, 10);
-        setIncidents(history);
+        try {
+          const history = await fetchIncidents(res.tableFQN, 10);
+          if (generateSeqRef.current === seq) setIncidents(history);
+        } catch {
+          // History is non-essential; keep the report even if it fails.
+          if (generateSeqRef.current === seq) setIncidents([]);
+        }
       } catch (e) {
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
+        if (generateSeqRef.current !== seq) return;
+        clearStageTimers();
         setStage("idle");
         setReport(null);
         setError(e instanceof Error ? e.message : "Unknown error");
       }
     },
-    [query, mockMode]
+    [query, mockMode, clearStageTimers]
   );
 
   return (
@@ -189,7 +223,7 @@ export default function App() {
                 title="Incident report"
                 subtitle={report.tableFQN}
                 markdown={report.markdown}
-                source={report.source === "llm" ? "claude" : report.source}
+                source={report.source}
                 warnings={report.warnings}
                 filename={downloadFilename(report.tableFQN)}
               />
@@ -199,8 +233,12 @@ export default function App() {
             <div className="flex flex-col gap-4">
               <SeverityBadge severity={severity} />
               <ExplainabilityPanel report={report} />
-              <LineageGraph lineage={report.lineage} />
-              <IncidentChart incidents={incidents} />
+              <Suspense fallback={<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-500">Loading lineage graph…</div>}>
+                <LineageGraph lineage={report.lineage} />
+              </Suspense>
+              <Suspense fallback={null}>
+                <IncidentChart incidents={incidents} />
+              </Suspense>
               <ShareActions report={report} />
 
               {/* Failed tests */}

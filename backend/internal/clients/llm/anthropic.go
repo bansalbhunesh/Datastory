@@ -117,7 +117,10 @@ func (a *Anthropic) once(ctx context.Context, payload []byte) (string, bool, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return "", true, errs.Upstream("llm read response", readErr)
+	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		return "", true, errs.Upstream(fmt.Sprintf("llm http %s", resp.Status), nil)
 	}

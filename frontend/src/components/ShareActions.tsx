@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GenerateReportResponse } from "../types/report";
 
 type Props = { report: GenerateReportResponse };
@@ -10,14 +10,25 @@ function tableName(fqn: string) {
 
 export function ShareActions({ report }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+  }, []);
 
   const copy = useCallback(async (text: string, key: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(key);
-      setTimeout(() => setCopied(null), 1600);
+      setCopyError(null);
+      if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => {
+        setCopied(null);
+        resetTimerRef.current = null;
+      }, 1600);
     } catch {
-      // silently ignore clipboard permission errors
+      setCopyError("Clipboard permission denied.");
     }
   }, []);
 
@@ -54,6 +65,10 @@ export function ShareActions({ report }: Props) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
       <div className="text-sm font-semibold text-slate-200">Share</div>
+      <div className="sr-only" aria-live="polite" role="status">
+        {copyError ? copyError : copied ? `Copied ${copied} text` : ""}
+      </div>
+      {copyError ? <div className="mt-2 text-xs text-amber-300">{copyError}</div> : null}
       <div className="mt-3 flex flex-col gap-2">
         {actions.map((a) => (
           <button

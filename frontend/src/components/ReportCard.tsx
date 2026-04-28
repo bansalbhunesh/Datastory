@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -33,13 +33,26 @@ function translateWarning(w: string): string {
 export function ReportCard({ title, subtitle, markdown, source, warnings, filename }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const copyResetRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyResetRef.current !== null) {
+      window.clearTimeout(copyResetRef.current);
+    }
+  }, []);
 
   const onCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(markdown);
       setCopyError(null);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      copyResetRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetRef.current = null;
+      }, 1500);
     } catch {
       setCopyError("Clipboard permission denied. Use Download instead.");
       setCopied(false);
@@ -97,6 +110,11 @@ export function ReportCard({ title, subtitle, markdown, source, warnings, filena
             Download .md
           </button>
         </div>
+      </div>
+
+      {/* Screen-reader announcement for clipboard actions. */}
+      <div className="sr-only" aria-live="polite" role="status">
+        {copyError ? copyError : copied ? "Report markdown copied to clipboard." : ""}
       </div>
 
       {copyError ? <div className="mt-3 text-xs text-amber-300">{copyError}</div> : null}

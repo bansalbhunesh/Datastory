@@ -155,8 +155,12 @@ func (s *ReportService) generateUncached(ctx context.Context, fqn string, log *s
 			Severity:  report.Severity,
 			Source:    report.Source,
 		}
+		// Persist asynchronously so a slow disk does not stall the response,
+		// but bound the operation so the goroutine always exits.
 		go func() {
-			if err := s.incidents.Append(entry); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.incidents.Append(ctx, entry); err != nil {
 				s.log.Warn("incident persist failed", "error", err.Error(), "table", entry.TableFQN)
 			}
 		}()
@@ -203,9 +207,12 @@ func (s *ReportService) lineage(ctx context.Context, fqn string) (json.RawMessag
 	return raw, nil
 }
 
+// SearchTables returns autocomplete-friendly hits. Very short / empty queries
+// return an empty slice rather than a 400, so the UI can call this on every
+// keystroke without flapping error states.
 func (s *ReportService) SearchTables(ctx context.Context, q string) ([]domain.TableHit, error) {
 	q = strings.TrimSpace(q)
-	if q == "" {
+	if len(q) < 2 {
 		return []domain.TableHit{}, nil
 	}
 	return s.om.SearchTables(ctx, q, 15)

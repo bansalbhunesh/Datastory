@@ -2,7 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +62,9 @@ func Load() (Config, error) {
 	if cfg.OMBaseURL == "" {
 		return cfg, errors.New("OM_BASE_URL is required")
 	}
+	if !strings.HasPrefix(cfg.OMBaseURL, "http://") && !strings.HasPrefix(cfg.OMBaseURL, "https://") {
+		return cfg, fmt.Errorf("OM_BASE_URL must start with http:// or https:// (got %q)", cfg.OMBaseURL)
+	}
 	if cfg.OMToken == "" && (cfg.OMEmail == "" || cfg.OMPassword == "") {
 		return cfg, errors.New("provide OM_TOKEN or OM_EMAIL+OM_PASSWORD")
 	}
@@ -76,6 +81,13 @@ func Load() (Config, error) {
 				return cfg, errors.New("ALLOWED_ORIGINS cannot contain '*' when API_KEY is set")
 			}
 		}
+	}
+	if cfg.FrontendDist != "" {
+		abs, err := filepath.Abs(cfg.FrontendDist)
+		if err != nil {
+			return cfg, fmt.Errorf("FRONTEND_DIST not resolvable: %w", err)
+		}
+		cfg.FrontendDist = abs
 	}
 	return cfg, nil
 }

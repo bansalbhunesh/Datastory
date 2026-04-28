@@ -24,21 +24,34 @@ const (
 
 // Handlers is a thin HTTP layer. No business logic lives here.
 type Handlers struct {
-	report *services.ReportService
-	om     *openmetadata.Client
-	llm    llm.Client
-	log    *slog.Logger
+	report     *services.ReportService
+	om         *openmetadata.Client
+	llm        llm.Client
+	log        *slog.Logger
+	genTimeout time.Duration
 }
 
-func NewHandlers(r *services.ReportService, om *openmetadata.Client, l llm.Client, log *slog.Logger) *Handlers {
-	return &Handlers{report: r, om: om, llm: l, log: log}
+// HandlersConfig configures handler-level behaviour. Zero values fall back
+// to sensible defaults so existing call sites keep working.
+type HandlersConfig struct {
+	GenerateTimeout time.Duration
+}
+
+func NewHandlers(r *services.ReportService, om *openmetadata.Client, l llm.Client, log *slog.Logger, cfg ...HandlersConfig) *Handlers {
+	h := &Handlers{report: r, om: om, llm: l, log: log, genTimeout: 45 * time.Second}
+	if len(cfg) > 0 && cfg[0].GenerateTimeout > 0 {
+		h.genTimeout = cfg[0].GenerateTimeout
+	}
+	return h
 }
 
 // POST /api/generate-report
 func (h *Handlers) GenerateReport(c *gin.Context) {
 	var req GenerateReportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.respondError(c, errs.BadRequest("invalid json: "+err.Error()))
+		// Avoid leaking decoder internals; the precise cause is in server logs.
+		h.log.Warn("generate-report: invalid json", "error", err.Error())
+		h.respondError(c, errs.BadRequest("invalid JSON body"))
 		return
 	}
 	if strings.TrimSpace(req.Query) == "" && strings.TrimSpace(req.TableFQN) == "" {
@@ -56,7 +69,7 @@ func (h *Handlers) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), h.genTimeout)
 	defer cancel()
 
 	report, err := h.report.Generate(ctx, services.GenerateInput{
@@ -85,6 +98,12 @@ func (h *Handlers) SearchTables(c *gin.Context) {
 }
 
 // GET /api/ready
+//
+// Always returns 200 with a structured payload. The frontend renders the
+// individual booleans, and a 200 here just means "the API process is up";
+// it does not imply OpenMetadata is reachable. We avoid 503 so the SPA can
+// still render a clear "OpenMetadata unreachable" banner instead of a
+// browser-side network error.
 func (h *Handlers) Ready(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
